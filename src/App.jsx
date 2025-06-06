@@ -7,7 +7,8 @@ import {
   DollarSign, Send, Lock, Wallet, ArrowDown, ArrowUp, Shield, TrendingUp, 
   Zap, CheckCircle, XCircle, AlertCircle, Globe, Activity, Sparkles, 
   BarChart3, Clock, Users, Award, RefreshCw, AlertTriangle, Eye,
-  Coins, CreditCard, Target, Settings, TrendingDown
+  Coins, CreditCard, Target, Settings, TrendingDown, Heart,
+  Database, Signal, Gauge, Timer, Layers, Code
 } from 'lucide-react';
 import { useMediaQuery } from 'react-responsive';
 import { CONTRACT_ADDRESS, CONTRACT_ABI, SUPPORTED_ASSETS } from './contractConfig';
@@ -26,7 +27,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Enhanced state for contract data
+  // Enhanced state for new contract features
   const [userPosition, setUserPosition] = useState(null);
   const [didInfo, setDidInfo] = useState(null);
   const [collateralRatio, setCollateralRatio] = useState(0);
@@ -34,6 +35,9 @@ function App() {
   const [dynamicRates, setDynamicRates] = useState({});
   const [assetInfo, setAssetInfo] = useState({});
   const [priceUpdateTime, setPriceUpdateTime] = useState(null);
+  const [priceDataHealth, setPriceDataHealth] = useState({});
+  const [upkeepInfo, setUpkeepInfo] = useState(null);
+  const [emergencyMode, setEmergencyMode] = useState(false);
 
   const { address: account, chainId } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -45,6 +49,25 @@ function App() {
     }
   }, [chainId, switchChain]);
 
+  const checkPriceFeedHealth = async (contractInstance) => {
+    const healthStatus = {};
+    for (let i = 0; i < 3; i++) {
+      try {
+        const health = await contractInstance.checkPriceFeedHealth(i);
+        const symbols = ['USDC', 'ETH', 'BTC'];
+        healthStatus[symbols[i]] = {
+          isHealthy: health[0],
+          price: health[1],
+          lastUpdated: new Date(Number(health[2]) * 1000),
+          hoursSinceUpdate: Number(health[3])
+        };
+      } catch (error) {
+        console.error(`Health check failed for feed ${i}:`, error);
+      }
+    }
+    setPriceDataHealth(healthStatus);
+  };
+
   const fetchContractData = async (contractInstance) => {
     try {
       // Basic user data
@@ -52,16 +75,27 @@ function App() {
       const bal = await contractInstance.getDepositBalance(account);
       const borrowed = await contractInstance.borrowedAmounts(account);
       
-      // Price data with timestamp
-      const usdcPrice = await contractInstance.getPriceFormatted(0);
-      const ethPrice = await contractInstance.getPriceFormatted(1);
-      const btcPrice = await contractInstance.getPriceFormatted(2);
-      
       setIsVerified(verified);
       setBalance(ethers.formatEther(bal));
       setBorrowedAmount(ethers.formatEther(borrowed));
+
+      // Enhanced price fetching with health checks
+      await checkPriceFeedHealth(contractInstance);
+      
+      // Try to get formatted prices with fallback
+      const pricePromises = [
+        contractInstance.getPriceFormatted(0).catch(() => 'Price unavailable'),
+        contractInstance.getPriceFormatted(1).catch(() => 'Price unavailable'),
+        contractInstance.getPriceFormatted(2).catch(() => 'Price unavailable')
+      ];
+      
+      const [usdcPrice, ethPrice, btcPrice] = await Promise.all(pricePromises);
       setPrices({ usdc: usdcPrice, eth: ethPrice, btc: btcPrice });
       setPriceUpdateTime(new Date());
+
+      // Check if we're in emergency mode (price data issues)
+      const hasUnhealthyFeeds = Object.values(priceDataHealth).some(feed => !feed.isHealthy);
+      setEmergencyMode(hasUnhealthyFeeds);
 
       if (verified) {
         // Fetch enhanced user data
@@ -75,25 +109,42 @@ function App() {
         setCollateralRatio(Number(colRatio));
         setLiquidationPrice(ethers.formatEther(liqPrice));
 
-        // Fetch dynamic rates for all assets
+        // Fetch dynamic rates and asset info for all supported assets
         const rates = {};
         const assets = {};
-        for (const [symbol] of Object.entries(SUPPORTED_ASSETS)) {
+        const assetSymbols = ['USDC', 'ETH', 'BTC'];
+        
+        for (const symbol of assetSymbols) {
           try {
             rates[symbol] = await contractInstance.getDynamicBorrowRate(symbol);
             assets[symbol] = await contractInstance.getAssetInfo(symbol);
           } catch (error) {
             console.error(`Error fetching data for ${symbol}:`, error);
+            // Set fallback values
+            rates[symbol] = symbol === 'ETH' ? 520 : symbol === 'BTC' ? 480 : 310;
           }
         }
         setDynamicRates(rates);
         setAssetInfo(assets);
+
+        // Check upkeep status
+        try {
+          const upkeepNeeded = await contractInstance.checkUpkeep('0x');
+          setUpkeepInfo({ needed: upkeepNeeded[0] });
+        } catch (error) {
+          console.error('Upkeep check failed:', error);
+        }
       }
     } catch (error) {
-      setMessage('Error fetching contract data');
+      setMessage('Error fetching contract data - some features may be limited');
       console.error('Contract data fetch error:', error);
-      // Fallback prices for demo
-      setPrices({ usdc: 'Offline: $1.00', eth: 'Offline: $3,245.67', btc: 'Offline: $68,420.50' });
+      // Enhanced fallback prices for demo
+      setPrices({ 
+        usdc: 'Offline: $1.00', 
+        eth: 'Offline: $3,245.67', 
+        btc: 'Offline: $68,420.50' 
+      });
+      setEmergencyMode(true);
     }
   };
 
@@ -115,7 +166,7 @@ function App() {
     }
   }, [account, chainId]);
 
-  // Event listeners
+  // Enhanced event listeners for new contract events
   useEffect(() => {
     if (!contract) return;
 
@@ -130,7 +181,12 @@ function App() {
     const handleAccessDenied = (user, reason) => {
       if (user.toLowerCase() === account?.toLowerCase()) {
         setIsVerified(false);
-        setMessage(`❌ Access Denied: ${reason}`);
+        const reasonMap = {
+          'Invalid DID': 'Invalid DID provided',
+          'Market unstable': 'Market conditions unstable (USDC price below threshold)',
+          'Price data unavailable': 'Chainlink price feeds temporarily unavailable'
+        };
+        setMessage(`❌ Access Denied: ${reasonMap[reason] || reason}`);
       }
     };
 
@@ -140,23 +196,38 @@ function App() {
       }
     };
 
-    const handleLiquidation = (user) => {
+    const handleLiquidation = (user, collateralLiquidated, debtRepaid) => {
       if (user.toLowerCase() === account?.toLowerCase()) {
-        setMessage('⚠️ Position Liquidated! Please check your account.');
+        setMessage(`⚠️ Position Liquidated! Collateral: ${ethers.formatEther(collateralLiquidated)} ETH, Debt: ${ethers.formatEther(debtRepaid)} ETH`);
         fetchContractData(contract);
       }
     };
 
     const handleInterestRateUpdate = (asset, newRate) => {
-      setMessage(`📈 Interest rate updated for ${asset}: ${newRate / 100}%`);
+      setMessage(`📈 Interest rate updated for ${asset}: ${Number(newRate) / 100}%`);
       fetchContractData(contract);
     };
 
+    const handleCreditScoreUpdate = (user, newScore) => {
+      if (user.toLowerCase() === account?.toLowerCase()) {
+        setMessage(`📊 Credit Score Updated: ${newScore}`);
+        fetchContractData(contract);
+      }
+    };
+
+    const handleAssetAdded = (symbol, priceIndex) => {
+      setMessage(`🆕 New Asset Added: ${symbol} (Price Feed Index: ${priceIndex})`);
+      fetchContractData(contract);
+    };
+
+    // Set up event listeners
     contract.on('AccessGranted', handleAccessGranted);
     contract.on('AccessDenied', handleAccessDenied);
     contract.on('DIDVerified', handleDIDVerified);
     contract.on('LiquidationExecuted', handleLiquidation);
     contract.on('InterestRateUpdated', handleInterestRateUpdate);
+    contract.on('CreditScoreUpdated', handleCreditScoreUpdate);
+    contract.on('AssetAdded', handleAssetAdded);
 
     return () => {
       contract.off('AccessGranted', handleAccessGranted);
@@ -164,6 +235,8 @@ function App() {
       contract.off('DIDVerified', handleDIDVerified);
       contract.off('LiquidationExecuted', handleLiquidation);
       contract.off('InterestRateUpdated', handleInterestRateUpdate);
+      contract.off('CreditScoreUpdated', handleCreditScoreUpdate);
+      contract.off('AssetAdded', handleAssetAdded);
     };
   }, [contract, account]);
 
@@ -177,7 +250,13 @@ function App() {
       await tx.wait();
       await fetchContractData(contract);
     } catch (error) {
-      setMessage('❌ Verification failed. Please try again.');
+      if (error.message.includes('Market unstable')) {
+        setMessage('❌ Verification failed: Market conditions unstable (USDC price too low)');
+      } else if (error.message.includes('Price data unavailable')) {
+        setMessage('❌ Verification failed: Chainlink price feeds temporarily unavailable');
+      } else {
+        setMessage('❌ Verification failed. Please check your DID and try again.');
+      }
       console.error('DID verification error:', error);
     } finally {
       setLoading(false);
@@ -215,7 +294,13 @@ function App() {
       setBorrowAmount('');
       setMessage(`✅ Borrow successful! ${borrowAmount} ETH has been transferred to your wallet.`);
     } catch (error) {
-      setMessage('❌ Borrow failed. Check your collateral and try again.');
+      if (error.message.includes('Cannot determine ETH price')) {
+        setMessage('❌ Borrow failed: ETH price unavailable from Chainlink feeds');
+      } else if (error.message.includes('Insufficient collateral')) {
+        setMessage('❌ Borrow failed: Insufficient collateral for this amount');
+      } else {
+        setMessage('❌ Borrow failed. Check your collateral and market conditions.');
+      }
       console.error('Borrow error:', error);
     } finally {
       setLoading(false);
@@ -229,7 +314,7 @@ function App() {
       await fetchContractData(contract);
       setMessage('✅ Prices updated successfully!');
     } catch (error) {
-      setMessage('❌ Failed to refresh prices');
+      setMessage('❌ Failed to refresh prices - Chainlink feeds may be experiencing issues');
     }
   };
 
@@ -240,17 +325,33 @@ function App() {
     </div>
   );
 
-  const PriceCard = ({ symbol, price, change, icon, gradient, subtitle }) => (
-    <div className={`price-card ${gradient}`}>
+  const PriceCard = ({ symbol, price, change, icon, gradient, subtitle, healthStatus }) => (
+    <div className={`price-card ${gradient} ${!healthStatus?.isHealthy ? 'unhealthy' : ''}`}>
       <div className="flex items-center justify-between mb-3">
         <div>
           <span className="price-symbol">{symbol}</span>
           {subtitle && <div className="price-subtitle">{subtitle}</div>}
         </div>
-        <div className="price-icon">{icon}</div>
+        <div className="price-icon-container">
+          <div className="price-icon">{icon}</div>
+          {healthStatus && (
+            <div className={`health-indicator ${healthStatus.isHealthy ? 'healthy' : 'unhealthy'}`}>
+              {healthStatus.isHealthy ? (
+                <Signal className="w-3 h-3" />
+              ) : (
+                <AlertTriangle className="w-3 h-3" />
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <p className="price-value">{price}</p>
       <p className="price-change">{change}</p>
+      {healthStatus && !healthStatus.isHealthy && (
+        <div className="price-warning">
+          <span className="text-xs">Data {healthStatus.hoursSinceUpdate}h old</span>
+        </div>
+      )}
     </div>
   );
 
@@ -291,7 +392,7 @@ function App() {
             </div>
             <div className="brand-text">
               <h1 className="brand-title">ChainGuard DeFi</h1>
-              <p className="brand-subtitle">Chainlink-Powered Identity & Lending</p>
+              <p className="brand-subtitle">Chainlink-Powered Secure Identity & Lending</p>
             </div>
           </div>
           <div className="wallet-connection">
@@ -299,6 +400,14 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* Emergency Mode Banner */}
+      {emergencyMode && (
+        <div className="emergency-banner">
+          <AlertTriangle className="w-5 h-5 text-yellow-400" />
+          <span>Emergency Mode: Some Chainlink price feeds are experiencing issues. Limited functionality available.</span>
+        </div>
+      )}
 
       <main className="main-content">
         {account ? (
@@ -342,7 +451,7 @@ function App() {
                 <div className="stat-card ratio-card">
                   <div className="stat-content">
                     <div className="stat-info">
-                      <p className="stat-label">Collateral Ratio</p>
+                      <p className="stat-label">Health Factor</p>
                       <p className="stat-value">{(collateralRatio / 100).toFixed(1)}%</p>
                       <RiskIndicator ratio={collateralRatio} />
                     </div>
@@ -351,21 +460,29 @@ function App() {
                 </div>
               </section>
 
-              {/* Chainlink Price Feeds Section */}
+              {/* Enhanced Chainlink Price Feeds Section */}
               <section className="section-card">
                 <div className="section-header">
                   <h2 className="section-title">
                     <DollarSign className="section-icon" /> 
-                    Chainlink Price Feeds
+                    Chainlink Price Feeds with Health Monitoring
                     <Sparkles className="ml-2 w-5 h-5 text-yellow-400" />
                   </h2>
-                  <button 
-                    onClick={refreshPrices} 
-                    className="btn-refresh"
-                    disabled={loading}
-                  >
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  </button>
+                  <div className="header-actions">
+                    {upkeepInfo?.needed && (
+                      <div className="upkeep-indicator">
+                        <Timer className="w-4 h-4 text-blue-400" />
+                        <span className="text-xs text-blue-400">Upkeep Needed</span>
+                      </div>
+                    )}
+                    <button 
+                      onClick={refreshPrices} 
+                      className="btn-refresh"
+                      disabled={loading}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
                 </div>
                 
                 <div className={`prices-grid ${isMobile ? 'mobile' : ''}`}>
@@ -376,6 +493,7 @@ function App() {
                     icon="$" 
                     gradient="usdc-gradient"
                     subtitle="Stablecoin Reference"
+                    healthStatus={priceDataHealth.USDC}
                   />
                   <PriceCard 
                     symbol="ETH/USD" 
@@ -384,6 +502,7 @@ function App() {
                     icon="Ξ" 
                     gradient="eth-gradient"
                     subtitle="Primary Collateral"
+                    healthStatus={priceDataHealth.ETH}
                   />
                   <PriceCard 
                     symbol="BTC/USD" 
@@ -392,24 +511,35 @@ function App() {
                     icon="₿" 
                     gradient="btc-gradient"
                     subtitle="Market Reference"
+                    healthStatus={priceDataHealth.BTC}
                   />
                 </div>
                 
-                {priceUpdateTime && (
-                  <div className="price-update-info">
-                    <Clock className="w-4 h-4 text-gray-400" />
+                <div className="price-feed-info">
+                  {priceUpdateTime && (
+                    <div className="price-update-info">
+                      <Clock className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm text-gray-400">
+                        Last updated: {priceUpdateTime.toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Price Feed Health Summary */}
+                  <div className="health-summary">
+                    <Database className="w-4 h-4 text-gray-400" />
                     <span className="text-sm text-gray-400">
-                      Last updated: {priceUpdateTime.toLocaleTimeString()}
+                      Feeds: {Object.values(priceDataHealth).filter(f => f?.isHealthy).length}/3 healthy
                     </span>
                   </div>
-                )}
+                </div>
               </section>
 
               {/* Enhanced Identity Verification */}
               <section className="section-card">
                 <h2 className="section-title">
                   <Lock className="section-icon" /> 
-                  Decentralized Identity Verification
+                  Enhanced DID Verification with Market Stability Checks
                 </h2>
                 
                 <div className="verification-form">
@@ -424,6 +554,10 @@ function App() {
                     />
                     <div className="input-hint">
                       Valid test DIDs: user123, user456, user789, demo_user, test_verified
+                      <br />
+                      <span className="text-yellow-400">
+                        Note: Verification includes USDC price stability check ($0.99+ required)
+                      </span>
                     </div>
                   </div>
                   
@@ -444,7 +578,7 @@ function App() {
                   {/* Enhanced DID Info Display */}
                   {didInfo && (
                     <div className="did-info-card">
-                      <h4 className="did-info-title">Identity Details</h4>
+                      <h4 className="did-info-title">Enhanced Identity Profile</h4>
                       <div className="did-info-grid">
                         <div className="did-info-item">
                           <span className="did-label">DID:</span>
@@ -462,9 +596,61 @@ function App() {
                           <span className="did-label">Total Borrowed:</span>
                           <span className="did-value">{ethers.formatEther(didInfo.totalBorrowed || 0)} ETH</span>
                         </div>
+                        <div className="did-info-item">
+                          <span className="did-label">Total Repaid:</span>
+                          <span className="did-value">{ethers.formatEther(didInfo.totalRepaid || 0)} ETH</span>
+                        </div>
+                        <div className="did-info-item">
+                          <span className="did-label">Account Status:</span>
+                          <span className={`did-value ${didInfo.isActive ? 'text-green-400' : 'text-red-400'}`}>
+                            {didInfo.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   )}
+                </div>
+              </section>
+
+              {/* Enhanced Multi-Asset Support Section */}
+              <section className="section-card">
+                <h2 className="section-title">
+                  <Layers className="section-icon" /> 
+                  Multi-Asset Support & Dynamic Rates
+                </h2>
+                
+                <div className="assets-grid">
+                  {Object.entries(assetInfo).map(([symbol, asset]) => (
+                    <div key={symbol} className="asset-card">
+                      <div className="asset-header">
+                        <h4 className="asset-symbol">{symbol}</h4>
+                        <div className={`asset-status ${asset.isActive ? 'active' : 'inactive'}`}>
+                          {asset.isActive ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        </div>
+                      </div>
+                      
+                      <div className="asset-details">
+                        <div className="asset-detail">
+                          <span className="detail-label">Base Rate:</span>
+                          <span className="detail-value">{(Number(asset.baseBorrowRate || 0) / 100).toFixed(2)}%</span>
+                        </div>
+                        <div className="asset-detail">
+                          <span className="detail-label">Dynamic Rate:</span>
+                          <span className="detail-value text-blue-400">
+                            {dynamicRates[symbol] ? (Number(dynamicRates[symbol]) / 100).toFixed(2) : 'N/A'}%
+                          </span>
+                        </div>
+                        <div className="asset-detail">
+                          <span className="detail-label">Collateral Factor:</span>
+                          <span className="detail-value">{(Number(asset.collateralFactor || 0) / 100).toFixed(0)}%</span>
+                        </div>
+                        <div className="asset-detail">
+                          <span className="detail-label">Price Feed Index:</span>
+                          <span className="detail-value">{Number(asset.priceIndex || 0)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </section>
 
@@ -472,7 +658,7 @@ function App() {
               <section className="section-card">
                 <h2 className="section-title">
                   <Wallet className="section-icon" /> 
-                  DeFi Lending Operations
+                  DeFi Lending Operations with Dynamic Rates
                 </h2>
                 
                 <div className={`lending-grid ${isMobile ? 'mobile' : ''}`}>
@@ -493,6 +679,10 @@ function App() {
                           ${userPosition ? (Number(userPosition.collateralValue) / 1e8).toFixed(2) : '0.00'}
                         </span>
                       </div>
+                      <div className="lending-stat">
+                        <span className="stat-label">Reputation Boost</span>
+                        <span className="stat-value text-green-400">+10 points</span>
+                      </div>
                     </div>
                     
                     <div className="input-group">
@@ -506,6 +696,9 @@ function App() {
                         step="0.001"
                         min="0"
                       />
+                      <div className="input-hint">
+                        Each deposit increases your reputation score and improves lending terms
+                      </div>
                     </div>
                     
                     <button
@@ -521,7 +714,7 @@ function App() {
                   <div className="lending-section borrow-section">
                     <h3 className="lending-title">
                       <ArrowUp className="lending-icon borrow-icon" />
-                      Borrow ETH
+                      Borrow ETH with Dynamic Rates
                     </h3>
                     
                     <div className="lending-stats">
@@ -531,8 +724,14 @@ function App() {
                       </div>
                       <div className="lending-stat">
                         <span className="stat-label">Dynamic Rate</span>
-                        <span className="stat-value">
+                        <span className="stat-value text-blue-400">
                           {dynamicRates.ETH ? `${(Number(dynamicRates.ETH) / 100).toFixed(2)}%` : '5.2%'} APY
+                        </span>
+                      </div>
+                      <div className="lending-stat">
+                        <span className="stat-label">Base Rate</span>
+                        <span className="stat-value">
+                          {assetInfo.ETH ? `${(Number(assetInfo.ETH.baseBorrowRate) / 100).toFixed(2)}%` : '5.2%'}
                         </span>
                       </div>
                     </div>
@@ -548,41 +747,77 @@ function App() {
                         step="0.001"
                         min="0"
                       />
+                      <div className="input-hint">
+                        Rate adjusts based on ETH price: Higher price = Lower rate
+                      </div>
                     </div>
                     
                     <button
                       onClick={borrowETH}
-                      disabled={loading || !borrowAmount || !isVerified}
+                      disabled={loading || !borrowAmount || !isVerified || emergencyMode}
                       className="btn btn-info btn-borrow"
                     >
                       <ArrowUp className="btn-icon" />
-                      <span>{loading ? 'Processing...' : 'Borrow ETH'}</span>
+                      <span>{loading ? 'Processing...' : emergencyMode ? 'Unavailable' : 'Borrow ETH'}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Risk Management Panel */}
+                {/* Advanced Risk Management Panel */}
                 {isVerified && userPosition && (
                   <div className="risk-panel">
                     <h4 className="risk-title">
                       <Target className="w-5 h-5 mr-2" />
-                      Risk Management
+                      Advanced Risk Management
                     </h4>
                     
-                    <div className="risk-metrics">
-                      <div className="risk-metric">
-                        <span className="risk-label">Liquidation Price:</span>
-                        <span className="risk-value">${liquidationPrice} ETH</span>
+                    <div className="risk-metrics-grid">
+                      <div className="risk-metric-card">
+                        <div className="risk-metric-header">
+                          <Gauge className="w-4 h-4 text-blue-400" />
+                          <span className="risk-metric-title">Health Factor</span>
+                        </div>
+                        <div className="risk-metric-value">
+                          <span className={`text-2xl font-bold ${collateralRatio < 120 ? 'text-red-400' : collateralRatio < 150 ? 'text-yellow-400' : 'text-green-400'}`}>
+                            {(collateralRatio / 100).toFixed(2)}
+                          </span>
+                          <RiskIndicator ratio={collateralRatio} />
+                        </div>
                       </div>
-                      <div className="risk-metric">
-                        <span className="risk-label">Health Factor:</span>
-                        <span className={`risk-value ${collateralRatio < 120 ? 'text-red-400' : 'text-green-400'}`}>
-                          {(collateralRatio / 100).toFixed(2)}
-                        </span>
+                      
+                      <div className="risk-metric-card">
+                        <div className="risk-metric-header">
+                          <TrendingDown className="w-4 h-4 text-red-400" />
+                          <span className="risk-metric-title">Liquidation Price</span>
+                        </div>
+                        <div className="risk-metric-value">
+                          <span className="text-2xl font-bold text-red-400">
+                            ${liquidationPrice === '0.0' ? 'N/A' : Number(liquidationPrice).toFixed(2)}
+                          </span>
+                          <span className="text-sm text-gray-400">ETH Price</span>
+                        </div>
                       </div>
-                      <div className="risk-metric">
-                        <span className="risk-label">Liquidation Threshold:</span>
-                        <span className="risk-value">80%</span>
+                      
+                      <div className="risk-metric-card">
+                        <div className="risk-metric-header">
+                          <Shield className="w-4 h-4 text-yellow-400" />
+                          <span className="risk-metric-title">Liquidation Threshold</span>
+                        </div>
+                        <div className="risk-metric-value">
+                          <span className="text-2xl font-bold text-yellow-400">80%</span>
+                          <span className="text-sm text-gray-400">Safety Limit</span>
+                        </div>
+                      </div>
+                      
+                      <div className="risk-metric-card">
+                        <div className="risk-metric-header">
+                          <Award className="w-4 h-4 text-purple-400" />
+                          <span className="risk-metric-title">Liquidation Bonus</span>
+                        </div>
+                        <div className="risk-metric-value">
+                          <span className="text-2xl font-bold text-purple-400">5%</span>
+                          <span className="text-sm text-gray-400">Liquidator Reward</span>
+                        </div>
                       </div>
                     </div>
                     
@@ -590,8 +825,30 @@ function App() {
                       <div className="liquidation-warning">
                         <AlertTriangle className="w-5 h-5 text-red-400" />
                         <span className="text-red-400 font-semibold">
-                          Warning: Position at risk of liquidation!
+                          Critical Warning: Position at immediate risk of liquidation!
                         </span>
+                        <button className="btn btn-sm btn-warning ml-4">
+                          Add Collateral
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Interest Calculation Display */}
+                    {borrowedAmount !== '0' && (
+                      <div className="interest-display">
+                        <h5 className="text-sm font-semibold text-gray-300 mb-2">Interest Calculation</h5>
+                        <div className="interest-details">
+                          <div className="interest-item">
+                            <span>Last Update:</span>
+                            <span>{userPosition.lastInterestUpdate ? new Date(Number(userPosition.lastInterestUpdate) * 1000).toLocaleString() : 'N/A'}</span>
+                          </div>
+                          <div className="interest-item">
+                            <span>Accrued Interest:</span>
+                            <span className="text-yellow-400">
+                              {((Number(borrowedAmount) * (dynamicRates.ETH ? Number(dynamicRates.ETH) / 10000 : 0.052)) / 365).toFixed(6)} ETH/day
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -601,72 +858,361 @@ function App() {
                   <div className="warning-message">
                     <AlertCircle className="warning-icon" />
                     <p className="warning-text">
-                      Please verify your decentralized identity to access lending and borrowing features.
+                      Please verify your decentralized identity to access enhanced lending and borrowing features with dynamic rates.
                     </p>
                   </div>
                 )}
               </section>
 
-              {/* Chainlink Features Showcase */}
-              <section className="section-card chainlink-features">
+              {/* Enhanced Chainlink Automation Status */}
+              <section className="section-card">
                 <h2 className="section-title">
-                  <Zap className="section-icon" /> 
-                  Chainlink Integrations
+                  <RefreshCw className="section-icon" /> 
+                  Chainlink Automation & Upkeep Status
                 </h2>
                 
-                <div className="features-grid">
-                  <div className="feature-card">
-                    <div className="feature-icon">
-                      <DollarSign className="w-6 h-6" />
+                <div className="automation-status">
+                  <div className="automation-card">
+                    <div className="automation-header">
+                      <Timer className="w-6 h-6 text-blue-400" />
+                      <h4 className="automation-title">Upkeep Status</h4>
                     </div>
-                    <h4 className="feature-title">Price Feeds</h4>
-                    <p className="feature-description">
-                      Real-time price data for ETH, BTC, and USDC from Chainlink's decentralized oracle network
-                    </p>
+                    <div className="automation-content">
+                      <div className="status-indicator">
+                        <span className={`status-dot ${upkeepInfo?.needed ? 'status-warning' : 'status-success'}`}></span>
+                        <span className="status-text">
+                          {upkeepInfo?.needed ? 'Upkeep Needed' : 'System Updated'}
+                        </span>
+                      </div>
+                      <div className="automation-details">
+                        <div className="automation-detail">
+                          <span className="detail-label">Upkeep Interval:</span>
+                          <span className="detail-value">1 Hour</span>
+                        </div>
+                        <div className="automation-detail">
+                          <span className="detail-label">Last Execution:</span>
+                          <span className="detail-value">
+                            {priceUpdateTime ? priceUpdateTime.toLocaleTimeString() : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   
-                  <div className="feature-card">
-                    <div className="feature-icon">
-                      <RefreshCw className="w-6 h-6" />
+                  <div className="automation-card">
+                    <div className="automation-header">
+                      <Activity className="w-6 h-6 text-green-400" />
+                      <h4 className="automation-title">Automated Tasks</h4>
                     </div>
-                    <h4 className="feature-title">Automation</h4>
-                    <p className="feature-description">
-                      Automated interest rate updates and position monitoring via Chainlink Keepers
-                    </p>
-                  </div>
-                  
-                  <div className="feature-card">
-                    <div className="feature-icon">
-                      <Shield className="w-6 h-6" />
+                    <div className="automation-content">
+                      <div className="automated-tasks">
+                        <div className="task-item">
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                          <span>Interest Rate Updates</span>
+                        </div>
+                        <div className="task-item">
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                          <span>Position Monitoring</span>
+                        </div>
+                        <div className="task-item">
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                          <span>Market Data Refresh</span>
+                        </div>
+                        <div className="task-item">
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                          <span>Liquidation Detection</span>
+                        </div>
+                      </div>
                     </div>
-                    <h4 className="feature-title">Market Stability</h4>
-                    <p className="feature-description">
-                      Identity verification includes market stability checks using USDC price feeds
-                    </p>
-                  </div>
-                  
-                  <div className="feature-card">
-                    <div className="feature-icon">
-                      <TrendingUp className="w-6 h-6" />
-                    </div>
-                    <h4 className="feature-title">Dynamic Rates</h4>
-                    <p className="feature-description">
-                      Interest rates adjust automatically based on real-time market conditions
-                    </p>
                   </div>
                 </div>
               </section>
+
+              {/* Enhanced Chainlink Features Showcase */}
+              <section className="section-card chainlink-features">
+                <h2 className="section-title">
+                  <Zap className="section-icon" /> 
+                  Advanced Chainlink Integrations
+                </h2>
+                
+                <div className="features-grid">
+                  <div className="feature-card advanced">
+                    <div className="feature-icon">
+                      <DollarSign className="w-6 h-6" />
+                    </div>
+                    <h4 className="feature-title">Enhanced Price Feeds</h4>
+                    <p className="feature-description">
+                      Real-time price data with staleness detection, health monitoring, and emergency fallbacks
+                    </p>
+                    <div className="feature-stats">
+                      <div className="feature-stat">
+                        <span className="stat-label">Feeds Active:</span>
+                        <span className="stat-value">
+                          {Object.values(priceDataHealth).filter(f => f?.isHealthy).length}/3
+                        </span>
+                      </div>
+                      <div className="feature-stat">
+                        <span className="stat-label">Update Frequency:</span>
+                        <span className="stat-value">Live</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="feature-card advanced">
+                    <div className="feature-icon">
+                      <RefreshCw className="w-6 h-6" />
+                    </div>
+                    <h4 className="feature-title">Smart Automation</h4>
+                    <p className="feature-description">
+                      Automated interest rate adjustments and position monitoring via Chainlink Keepers
+                    </p>
+                    <div className="feature-stats">
+                      <div className="feature-stat">
+                        <span className="stat-label">Upkeep Status:</span>
+                        <span className={`stat-value ${upkeepInfo?.needed ? 'text-yellow-400' : 'text-green-400'}`}>
+                          {upkeepInfo?.needed ? 'Pending' : 'Active'}
+                        </span>
+                      </div>
+                      <div className="feature-stat">
+                        <span className="stat-label">Interval:</span>
+                        <span className="stat-value">1 Hour</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="feature-card advanced">
+                    <div className="feature-icon">
+                      <Shield className="w-6 h-6" />
+                    </div>
+                    <h4 className="feature-title">Market Stability Guards</h4>
+                    <p className="feature-description">
+                      Enhanced security with USDC stability checks and emergency mode activation
+                    </p>
+                    <div className="feature-stats">
+                      <div className="feature-stat">
+                        <span className="stat-label">USDC Threshold:</span>
+                        <span className="stat-value">$0.99</span>
+                      </div>
+                      <div className="feature-stat">
+                        <span className="stat-label">Emergency Mode:</span>
+                        <span className={`stat-value ${emergencyMode ? 'text-red-400' : 'text-green-400'}`}>
+                          {emergencyMode ? 'Active' : 'Normal'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="feature-card advanced">
+                    <div className="feature-icon">
+                      <TrendingUp className="w-6 h-6" />
+                    </div>
+                    <h4 className="feature-title">Dynamic Rate Engine</h4>
+                    <p className="feature-description">
+                      Interest rates automatically adjust based on real-time market conditions and asset prices
+                    </p>
+                    <div className="feature-stats">
+                      <div className="feature-stat">
+                        <span className="stat-label">ETH Rate:</span>
+                        <span className="stat-value text-blue-400">
+                          {dynamicRates.ETH ? `${(Number(dynamicRates.ETH) / 100).toFixed(2)}%` : '5.2%'}
+                        </span>
+                      </div>
+                      <div className="feature-stat">
+                        <span className="stat-label">Rate Adjustments:</span>
+                        <span className="stat-value">Real-time</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Technical Implementation Details */}
+                <div className="technical-details">
+                  <h4 className="technical-title">
+                    <Settings className="w-5 h-5 mr-2" />
+                    Technical Implementation
+                  </h4>
+                  <div className="implementation-grid">
+                    <div className="implementation-item">
+                      <Code className="w-4 h-4 text-purple-400" />
+                      <span>Try-Catch Error Handling for Price Feeds</span>
+                    </div>
+                    <div className="implementation-item">
+                      <Database className="w-4 h-4 text-blue-400" />
+                      <span>Configurable Staleness Thresholds</span>
+                    </div>
+                    <div className="implementation-item">
+                      <Signal className="w-4 h-4 text-green-400" />
+                      <span>Health Monitoring for Each Feed</span>
+                    </div>
+                    <div className="implementation-item">
+                      <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                      <span>Emergency Mode & Fallback Systems</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Advanced Analytics Dashboard */}
+              <section className="section-card">
+                <h2 className="section-title">
+                  <BarChart3 className="section-icon" /> 
+                  Advanced Analytics & Insights
+                </h2>
+                
+                <div className="analytics-grid">
+                  <div className="analytics-card">
+                    <h4 className="analytics-title">
+                      <Users className="w-5 h-5 mr-2" />
+                      User Metrics
+                    </h4>
+                    {didInfo && (
+                      <div className="metrics-display">
+                        <div className="metric-item">
+                          <span className="metric-label">Verification Time:</span>
+                          <span className="metric-value">
+                            {new Date(Number(didInfo.verificationTime) * 1000).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <div className="metric-item">
+                          <span className="metric-label">Days Active:</span>
+                          <span className="metric-value">
+                            {Math.floor((Date.now() - Number(didInfo.verificationTime) * 1000) / (1000 * 60 * 60 * 24))}
+                          </span>
+                        </div>
+                        <div className="metric-item">
+                          <span className="metric-label">Reputation Growth:</span>
+                          <span className="metric-value text-green-400">
+                            +{Math.max(0, Number(didInfo.reputationPoints) - 100)} points
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="analytics-card">
+                    <h4 className="analytics-title">
+                      <Coins className="w-5 h-5 mr-2" />
+                      Lending Performance
+                    </h4>
+                    {didInfo && (
+                      <div className="metrics-display">
+                        <div className="metric-item">
+                          <span className="metric-label">Total Borrowed:</span>
+                          <span className="metric-value">
+                            {ethers.formatEther(didInfo.totalBorrowed || 0)} ETH
+                          </span>
+                        </div>
+                        <div className="metric-item">
+                          <span className="metric-label">Total Repaid:</span>
+                          <span className="metric-value">
+                            {ethers.formatEther(didInfo.totalRepaid || 0)} ETH
+                          </span>
+                        </div>
+                        <div className="metric-item">
+                          <span className="metric-label">Repayment Ratio:</span>
+                          <span className="metric-value text-blue-400">
+                            {didInfo.totalBorrowed > 0 
+                              ? `${((Number(didInfo.totalRepaid) / Number(didInfo.totalBorrowed)) * 100).toFixed(1)}%`
+                              : 'N/A'
+                            }
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="analytics-card">
+                    <h4 className="analytics-title">
+                      <Heart className="w-5 h-5 mr-2" />
+                      System Health
+                    </h4>
+                    <div className="metrics-display">
+                      <div className="metric-item">
+                        <span className="metric-label">Price Feeds Health:</span>
+                        <span className={`metric-value ${Object.values(priceDataHealth).every(f => f?.isHealthy) ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {Object.values(priceDataHealth).filter(f => f?.isHealthy).length}/3 Healthy
+                        </span>
+                      </div>
+                      <div className="metric-item">
+                        <span className="metric-label">Emergency Status:</span>
+                        <span className={`metric-value ${emergencyMode ? 'text-red-400' : 'text-green-400'}`}>
+                          {emergencyMode ? 'Emergency Mode' : 'Normal Operation'}
+                        </span>
+                      </div>
+                      <div className="metric-item">
+                        <span className="metric-label">Automation Status:</span>
+                        <span className={`metric-value ${upkeepInfo?.needed ? 'text-yellow-400' : 'text-green-400'}`}>
+                          {upkeepInfo?.needed ? 'Upkeep Pending' : 'Automated'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+            {process.env.NODE_ENV === 'development' && (
+              <section className="section-card debug-panel">
+                <h2 className="section-title">
+                  <Eye className="section-icon" /> 
+                  Debug Information
+                </h2>
+                <div className="debug-content">
+                  <details className="debug-section">
+                    <summary className="debug-summary">Price Feed Health Details</summary>
+                    <pre className="debug-data">
+                      {JSON.stringify(priceDataHealth, (key, value) =>
+                        typeof value === 'bigint' ? value.toString() : value,
+                        2
+                      )}
+                    </pre>
+                  </details>
+                  <details className="debug-section">
+                    <summary className="debug-summary">User Position Data</summary>
+                    <pre className="debug-data">
+                      {JSON.stringify(userPosition, (key, value) =>
+                        typeof value === 'bigint' ? value.toString() : value,
+                        2
+                      )}
+                    </pre>
+                  </details>
+                  <details className="debug-section">
+                    <summary className="debug-summary">Dynamic Rates</summary>
+                    <pre className="debug-data">
+                      {JSON.stringify(dynamicRates, (key, value) =>
+                        typeof value === 'bigint' ? value.toString() : value,
+                        2
+                      )}
+                    </pre>
+                  </details>
+                  <details className="debug-section">
+                    <summary className="debug-summary">Asset Information</summary>
+                    <pre className="debug-data">
+                      {JSON.stringify(assetInfo, (key, value) =>
+                        typeof value === 'bigint' ? value.toString() : value,
+                        2
+                      )}
+                    </pre>
+                  </details>
+                </div>
+              </section>
+            )}
 
               {/* Message Display */}
               {message && (
                 <div className={`message ${
                   message.includes('✅') || message.includes('✨') || message.includes('🎉') 
                     ? 'success' 
-                    : message.includes('⚠️') || message.includes('📈')
+                    : message.includes('⚠️') || message.includes('📈') || message.includes('📊')
                     ? 'warning'
                     : 'error'
                 }`}>
                   <p className="message-text">{message}</p>
+                  <button 
+                    onClick={() => setMessage('')}
+                    className="message-close"
+                  >
+                    ×
+                  </button>
                 </div>
               )}
             </div>

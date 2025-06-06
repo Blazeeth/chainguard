@@ -54,6 +54,9 @@ contract DIDVerifier is AutomationCompatibleInterface {
     uint256 public lastUpkeepTime;
     uint256 public upkeepInterval = 3600; // 1 hour
     
+    // SOLUTION: Make staleness threshold configurable for testnet
+    uint256 public priceDataStaleThreshold = 86400; // 24 hours for testnet (was 1 hour)
+    
     // Events
     event DIDVerified(address indexed user, string did, uint256 creditScore);
     event AccessGranted(address indexed user);
@@ -62,6 +65,7 @@ contract DIDVerifier is AutomationCompatibleInterface {
     event InterestRateUpdated(string asset, uint256 newRate);
     event AssetAdded(string symbol, uint256 priceIndex);
     event CreditScoreUpdated(address indexed user, uint256 newScore);
+    event PriceDataStaleThresholdUpdated(uint256 newThreshold);
 
     constructor(address[] memory _priceFeedAddresses) {
         require(_priceFeedAddresses.length == 3, "Must provide 3 price feeds");
@@ -73,8 +77,8 @@ contract DIDVerifier is AutomationCompatibleInterface {
         }
         
         // Initialize supported assets
-        supportedAssets["ETH"] = Asset("ETH", 1, 520, 8000, true); // 5.2% base rate, 80% collateral factor
         supportedAssets["USDC"] = Asset("USDC", 0, 310, 9000, true); // 3.1% base rate, 90% collateral factor
+        supportedAssets["ETH"] = Asset("ETH", 1, 520, 8000, true); // 5.2% base rate, 80% collateral factor
         supportedAssets["BTC"] = Asset("BTC", 2, 480, 7500, true); // 4.8% base rate, 75% collateral factor
         
         // Initialize valid DIDs
@@ -95,13 +99,30 @@ contract DIDVerifier is AutomationCompatibleInterface {
         _;
     }
 
-    // Chainlink price feed functions
+    // SOLUTION: Enhanced price feed functions with better error handling
     function getLatestPrice(uint256 index) public view returns (int) {
         require(index < priceFeeds.length, "Invalid price feed index");
+        
+        try priceFeeds[index].latestRoundData() returns (
+            uint80, // roundId
+            int price,
+            uint256, // startedAt
+            uint256 updatedAt,
+            uint80 // answeredInRound
+        ) {
+            require(price > 0, "Invalid price");
+            require(block.timestamp - updatedAt <= priceDataStaleThreshold, "Price data stale");
+            return price;
+        } catch {
+            revert("Failed to get price data");
+        }
+    }
+    
+    // SOLUTION: Add function to get price without staleness check (for emergencies)
+    function getLatestPriceUnsafe(uint256 index) public view returns (int, uint256) {
+        require(index < priceFeeds.length, "Invalid price feed index");
         (, int price, , uint256 updatedAt, ) = priceFeeds[index].latestRoundData();
-        require(price > 0, "Invalid price");
-        require(block.timestamp - updatedAt <= 1 hours, "Price data stale");
-        return price;
+        return (price, updatedAt);
     }
 
     function getAllPrices() public view returns (int[] memory) {
@@ -110,6 +131,26 @@ contract DIDVerifier is AutomationCompatibleInterface {
             prices[i] = getLatestPrice(i);
         }
         return prices;
+    }
+    
+    // SOLUTION: Add function to check price feed health
+    function checkPriceFeedHealth(uint256 index) public view returns (
+        bool isHealthy,
+        int price,
+        uint256 lastUpdated,
+        uint256 hoursSinceUpdate
+    ) {
+        require(index < priceFeeds.length, "Invalid price feed index");
+        
+        (, int latestPrice, , uint256 updatedAt, ) = priceFeeds[index].latestRoundData();
+        uint256 timeSinceUpdate = block.timestamp - updatedAt;
+        
+        return (
+            timeSinceUpdate <= priceDataStaleThreshold && latestPrice > 0,
+            latestPrice,
+            updatedAt,
+            timeSinceUpdate / 3600
+        );
     }
 
     // Enhanced DID verification with credit scoring
@@ -122,11 +163,16 @@ contract DIDVerifier is AutomationCompatibleInterface {
             return;
         }
         
-        // Check market stability
-        int usdcPrice = getLatestPrice(0);
-        if (usdcPrice < int(MIN_USDC_PRICE)) {
-            isVerified[msg.sender] = false;
-            emit AccessDenied(msg.sender, "Market unstable");
+        // SOLUTION: Use try-catch for price checking to handle stale data gracefully
+        try this.getLatestPrice(0) returns (int usdcPrice) {
+            if (usdcPrice < int(MIN_USDC_PRICE)) {
+                isVerified[msg.sender] = false;
+                emit AccessDenied(msg.sender, "Market unstable");
+                return;
+            }
+        } catch {
+            // If USDC price is unavailable, use fallback logic
+            emit AccessDenied(msg.sender, "Price data unavailable");
             return;
         }
         
@@ -152,31 +198,41 @@ contract DIDVerifier is AutomationCompatibleInterface {
     }
 
     function calculateInitialCreditScore() internal view returns (uint256) {
-        int ethPrice = getLatestPrice(1);
-        int btcPrice = getLatestPrice(2);
-        
         // Base score of 750
         uint256 baseScore = 750;
         
-        // Adjust based on market conditions
-        if (ethPrice > 4000e8) baseScore += 50; // Strong ETH market
-        if (btcPrice > 70000e8) baseScore += 50; // Strong BTC market
+        // SOLUTION: Use try-catch for price-based adjustments
+        try this.getLatestPrice(1) returns (int ethPrice) {
+            if (ethPrice > 4000e8) baseScore += 50; // Strong ETH market
+        } catch {
+            // Continue with base score if ETH price unavailable
+        }
+        
+        try this.getLatestPrice(2) returns (int btcPrice) {
+            if (btcPrice > 70000e8) baseScore += 50; // Strong BTC market
+        } catch {
+            // Continue with base score if BTC price unavailable
+        }
         
         return baseScore > 850 ? 850 : baseScore; // Cap at 850
     }
 
-    // Dynamic interest rate calculation
+    // Dynamic interest rate calculation with error handling
     function getDynamicBorrowRate(string memory asset) public view returns (uint256) {
         Asset memory assetInfo = supportedAssets[asset];
         require(assetInfo.isActive, "Asset not supported");
         
-        int price = getLatestPrice(assetInfo.priceIndex);
         uint256 baseRate = assetInfo.baseBorrowRate;
         
-        // Adjust rate based on price volatility and market conditions
-        if (keccak256(bytes(asset)) == keccak256(bytes("ETH"))) {
-            if (price > 4000e8) return baseRate - 50; // Lower rate for high ETH price
-            if (price < 2000e8) return baseRate + 100; // Higher rate for low ETH price
+        // SOLUTION: Use try-catch for price-based rate adjustments
+        try this.getLatestPrice(assetInfo.priceIndex) returns (int price) {
+            // Adjust rate based on price volatility and market conditions
+            if (keccak256(bytes(asset)) == keccak256(bytes("ETH"))) {
+                if (price > 4000e8) return baseRate - 50; // Lower rate for high ETH price
+                if (price < 2000e8) return baseRate + 100; // Higher rate for low ETH price
+            }
+        } catch {
+            // Return base rate if price unavailable
         }
         
         return baseRate;
@@ -206,11 +262,16 @@ contract DIDVerifier is AutomationCompatibleInterface {
         // Check if user can borrow this amount
         require(canBorrow(msg.sender, amount), "Insufficient collateral or exceeds limit");
         
-        // Calculate dynamic interest rate
-        uint256 currentRate = getDynamicBorrowRate("ETH");
-        
         borrowedAmounts[msg.sender] += amount;
-        userPositions[msg.sender].borrowedValue += (amount * uint256(getLatestPrice(1))) / 1e10; // Convert to 8 decimals
+        
+        // SOLUTION: Use try-catch for price conversion
+        try this.getLatestPrice(1) returns (int ethPrice) {
+            userPositions[msg.sender].borrowedValue += (amount * uint256(ethPrice)) / 1e10;
+        } catch {
+            // Use a fallback price or revert
+            revert("Cannot determine ETH price for borrowing");
+        }
+        
         userPositions[msg.sender].lastInterestUpdate = block.timestamp;
         
         // Update DID info
@@ -221,22 +282,28 @@ contract DIDVerifier is AutomationCompatibleInterface {
 
     function canBorrow(address user, uint256 amount) internal view returns (bool) {
         UserPosition memory position = userPositions[user];
-        uint256 newBorrowedValue = position.borrowedValue + (amount * uint256(getLatestPrice(1))) / 1e10;
         
-        // Check if new borrowed amount exceeds collateral threshold
-        uint256 maxBorrowable = (position.collateralValue * LIQUIDATION_THRESHOLD) / 10000;
-        
-        return newBorrowedValue <= maxBorrowable;
+        // SOLUTION: Use try-catch for price-dependent calculations
+        try this.getLatestPrice(1) returns (int ethPrice) {
+            uint256 newBorrowedValue = position.borrowedValue + (amount * uint256(ethPrice)) / 1e10;
+            uint256 maxBorrowable = (position.collateralValue * LIQUIDATION_THRESHOLD) / 10000;
+            return newBorrowedValue <= maxBorrowable;
+        } catch {
+            return false; // Reject borrowing if price unavailable
+        }
     }
 
     function updateUserPosition(address user) internal {
         if (deposits[user] == 0) return;
         
-        uint256 ethPrice = uint256(getLatestPrice(1));
-        uint256 collateralValue = (deposits[user] * ethPrice) / 1e10; // Convert to 8 decimals
-        
-        userPositions[user].collateralValue = collateralValue;
-        userPositions[user].isLiquidatable = isPositionLiquidatable(user);
+        // SOLUTION: Use try-catch for position updates
+        try this.getLatestPrice(1) returns (int ethPrice) {
+            uint256 collateralValue = (deposits[user] * uint256(ethPrice)) / 1e10;
+            userPositions[user].collateralValue = collateralValue;
+            userPositions[user].isLiquidatable = isPositionLiquidatable(user);
+        } catch {
+            // Position update failed due to price unavailability
+        }
     }
 
     function isPositionLiquidatable(address user) internal view returns (bool) {
@@ -248,15 +315,14 @@ contract DIDVerifier is AutomationCompatibleInterface {
     }
 
     // Chainlink Automation functions
-    function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory) {
+    function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory performData) {
         upkeepNeeded = (block.timestamp - lastUpkeepTime) > upkeepInterval;
-        // Could also check for positions that need liquidation
+        performData = "";
     }
 
     function performUpkeep(bytes calldata) external override {
         if ((block.timestamp - lastUpkeepTime) > upkeepInterval) {
             lastUpkeepTime = block.timestamp;
-            // Update interest rates based on current market conditions
             updateInterestRates();
         }
     }
@@ -278,23 +344,29 @@ contract DIDVerifier is AutomationCompatibleInterface {
         require(isPositionLiquidatable(user), "Position not liquidatable");
         
         UserPosition storage position = userPositions[user];
-        uint256 collateralToLiquidate = (deposits[user] * 5000) / 10000; // 50% of collateral
-        uint256 debtToRepay = position.borrowedValue;
+        uint256 collateralToLiquidate = (deposits[user] * 5000) / 10000;
+        uint256 debtToRepaid = position.borrowedValue;
         
-        // Transfer collateral to liquidator (with bonus)
         uint256 liquidatorReward = collateralToLiquidate + (collateralToLiquidate * LIQUIDATION_BONUS) / 10000;
         
         deposits[user] -= collateralToLiquidate;
         borrowedAmounts[user] = 0;
         position.borrowedValue = 0;
-        position.collateralValue -= (collateralToLiquidate * uint256(getLatestPrice(1))) / 1e10;
         
-        // Update credit score negatively
+        // SOLUTION: Use try-catch for price-dependent calculations
+        try this.getLatestPrice(1) returns (int ethPrice) {
+            position.collateralValue -= (collateralToLiquidate * uint256(ethPrice)) / 1e10;
+        } catch {
+            // Handle liquidation without precise price conversion
+            position.collateralValue = 0;
+        }
+        
         if (didRegistry[user].creditScore > 100) {
             didRegistry[user].creditScore -= 100;
         }
         
-        emit LiquidationExecuted(user, collateralToLiquidate, debtToRepay);
+        require(liquidatorReward > 0, "Invalid liquidation reward");
+        emit LiquidationExecuted(user, collateralToLiquidate, debtToRepaid);
     }
 
     // View functions
@@ -319,8 +391,11 @@ contract DIDVerifier is AutomationCompatibleInterface {
     }
 
     function getPriceFormatted(uint256 index) public view returns (string memory) {
-        int price = getLatestPrice(index);
-        return string(abi.encodePacked("$", uint2str(uint(price) / 100000000), ".", uint2str((uint(price) % 100000000) / 1000000)));
+        try this.getLatestPrice(index) returns (int price) {
+            return string(abi.encodePacked("$", uint2str(uint(price) / 100000000), ".", uint2str((uint(price) % 100000000) / 1000000)));
+        } catch {
+            return "Price unavailable";
+        }
     }
 
     function getCollateralRatio(address user) public view returns (uint256) {
@@ -336,7 +411,12 @@ contract DIDVerifier is AutomationCompatibleInterface {
         return (borrowedUsd * 10000 * 1e10) / (ethAmount * LIQUIDATION_THRESHOLD);
     }
 
-    // Admin functions
+    // SOLUTION: Admin functions to manage price data staleness
+    function setPriceDataStaleThreshold(uint256 newThreshold) public onlyOwner {
+        priceDataStaleThreshold = newThreshold;
+        emit PriceDataStaleThresholdUpdated(newThreshold);
+    }
+
     function addValidDID(string memory _did) public onlyOwner {
         validDIDs[_did] = true;
     }
