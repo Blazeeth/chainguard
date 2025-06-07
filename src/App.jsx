@@ -70,7 +70,6 @@ function App() {
 
   const fetchContractData = async (contractInstance) => {
     try {
-      // Basic user data
       const verified = await contractInstance.checkUserAccess(account);
       const bal = await contractInstance.getDepositBalance(account);
       const borrowed = await contractInstance.borrowedAmounts(account);
@@ -79,10 +78,8 @@ function App() {
       setBalance(ethers.formatEther(bal));
       setBorrowedAmount(ethers.formatEther(borrowed));
 
-      // Enhanced price fetching with health checks
       await checkPriceFeedHealth(contractInstance);
       
-      // Try to get formatted prices with fallback
       const pricePromises = [
         contractInstance.getPriceFormatted(0).catch(() => 'Price unavailable'),
         contractInstance.getPriceFormatted(1).catch(() => 'Price unavailable'),
@@ -93,12 +90,10 @@ function App() {
       setPrices({ usdc: usdcPrice, eth: ethPrice, btc: btcPrice });
       setPriceUpdateTime(new Date());
 
-      // Check if we're in emergency mode (price data issues)
       const hasUnhealthyFeeds = Object.values(priceDataHealth).some(feed => !feed.isHealthy);
       setEmergencyMode(hasUnhealthyFeeds);
 
       if (verified) {
-        // Fetch enhanced user data
         const position = await contractInstance.getUserPosition(account);
         const did = await contractInstance.getDIDInfo(account);
         const colRatio = await contractInstance.getCollateralRatio(account);
@@ -109,7 +104,6 @@ function App() {
         setCollateralRatio(Number(colRatio));
         setLiquidationPrice(ethers.formatEther(liqPrice));
 
-        // Fetch dynamic rates and asset info for all supported assets
         const rates = {};
         const assets = {};
         const assetSymbols = ['USDC', 'ETH', 'BTC'];
@@ -120,14 +114,12 @@ function App() {
             assets[symbol] = await contractInstance.getAssetInfo(symbol);
           } catch (error) {
             console.error(`Error fetching data for ${symbol}:`, error);
-            // Set fallback values
             rates[symbol] = symbol === 'ETH' ? 520 : symbol === 'BTC' ? 480 : 310;
           }
         }
         setDynamicRates(rates);
         setAssetInfo(assets);
 
-        // Check upkeep status
         try {
           const upkeepNeeded = await contractInstance.checkUpkeep('0x');
           setUpkeepInfo({ needed: upkeepNeeded[0] });
@@ -138,12 +130,7 @@ function App() {
     } catch (error) {
       setMessage('Error fetching contract data - some features may be limited');
       console.error('Contract data fetch error:', error);
-      // Enhanced fallback prices for demo
-      setPrices({ 
-        usdc: 'Offline: $1.00', 
-        eth: 'Offline: $3,245.67', 
-        btc: 'Offline: $68,420.50' 
-      });
+      setPrices({ usdc: 'Offline: $1.00', eth: 'Offline: $3,245.67', btc: 'Offline: $68,420.50' });
       setEmergencyMode(true);
     }
   };
@@ -166,7 +153,6 @@ function App() {
     }
   }, [account, chainId]);
 
-  // Enhanced event listeners for new contract events
   useEffect(() => {
     if (!contract) return;
 
@@ -220,7 +206,6 @@ function App() {
       fetchContractData(contract);
     };
 
-    // Set up event listeners
     contract.on('AccessGranted', handleAccessGranted);
     contract.on('AccessDenied', handleAccessDenied);
     contract.on('DIDVerified', handleDIDVerified);
@@ -319,8 +304,10 @@ function App() {
   };
 
   const StatusBadge = ({ isVerified }) => (
-    <div className={`status-badge ${isVerified ? 'verified' : 'unverified'}`}>
-      {isVerified ? <CheckCircle className="w-4 h-4 mr-2" /> : <XCircle className="w-4 h-4 mr-2" />}
+    <div className={`inline-flex items-center px-2 py-1 rounded-full text-sm font-medium  ${
+      isVerified ? 'text-green-600' : 'text-red-800'
+    }`}>
+      {isVerified ? <CheckCircle className="w-4 h-4 mr-1" /> : <XCircle className="w-4 h-4 mr-1" />}
       {isVerified ? 'Verified' : 'Unverified'}
     </div>
   );
@@ -357,18 +344,16 @@ function App() {
 
   const RiskIndicator = ({ ratio }) => {
     const getRiskLevel = (ratio) => {
-      if (ratio >= 200) return { level: 'Safe', color: 'text-green-400', icon: CheckCircle };
-      if (ratio >= 150) return { level: 'Moderate', color: 'text-yellow-400', icon: AlertCircle };
-      return { level: 'High Risk', color: 'text-red-400', icon: AlertTriangle };
+      if (ratio >= 200) return { level: 'Safe', color: 'text-green-600', bg: 'bg' };
+      if (ratio >= 150) return { level: 'Moderate', color: 'text-yellow-600', bg: 'bg' };
+      return { level: 'High Risk', color: 'text-red-600', bg: 'bg' };
     };
-    
     const risk = getRiskLevel(ratio);
-    const Icon = risk.icon;
-    
+    const Icon = risk.color.includes('green') ? CheckCircle : risk.color.includes('yellow') ? AlertCircle : AlertTriangle;
     return (
-      <div className={`flex items-center gap-2 ${risk.color}`}>
-        <Icon className="w-4 h-4" />
-        <span className="font-semibold">{risk.level}</span>
+      <div className={`inline-flex items-center px-2 py-1 rounded-full ${risk.bg} ${risk.color}`}>
+        <Icon className="w-4 h-4 mr-1" />
+        <span className="font-medium">{risk.level}</span>
       </div>
     );
   };
@@ -383,16 +368,18 @@ function App() {
           <div className="shape shape-4"></div>
         </div>
       </div>
-      
+
       <header className="app-header">
         <div className="header-content">
           <div className="brand">
             <div className="brand-icon">
-              <Shield className="w-8 h-8" />
+              <Shield className="w-8 h-8 text-white" />
             </div>
-            <div className="brand-text">
+            <div>
+              <div className="brand-text">
               <h1 className="brand-title">ChainGuard DeFi</h1>
-              <p className="brand-subtitle">Chainlink-Powered Secure Identity & Lending</p>
+              <p className="brand-subtitle">Chainlink-Powered Identity & Lending</p>
+            </div>
             </div>
           </div>
           <div className="wallet-connection">
@@ -401,11 +388,11 @@ function App() {
         </div>
       </header>
 
-      {/* Emergency Mode Banner */}
+     {/* Emergency Mode Banner */}
       {emergencyMode && (
         <div className="emergency-banner">
-          <AlertTriangle className="w-5 h-5 text-yellow-400" />
-          <span>Emergency Mode: Some Chainlink price feeds are experiencing issues. Limited functionality available.</span>
+          <AlertTriangle className="w-5 h-5 yellow-400" />
+          Emergency Mode: Some Chainlink price feeds are experiencing issues. Limited functionality available.
         </div>
       )}
 
@@ -413,16 +400,16 @@ function App() {
         {account ? (
           chainId === sepolia.id ? (
             <div className="content-grid">
-              {/* Enhanced Statistics Section */}
-              <section className="hero-stats">
+              {/* Hero Stats */}
+              <div className="hero-stats">
                 <div className="stat-card balance-card">
                   <div className="stat-content">
                     <div className="stat-info">
                       <p className="stat-label">Collateral Balance</p>
-                      <p className="stat-value">{balance} ETH</p>
-                      <p className="stat-subtitle">${userPosition ? (Number(userPosition.collateralValue) / 1e8).toFixed(2) : '0.00'}</p>
+                      <p className="text-2xl font-bold text-white-900 ">{balance} ETH</p>
+                      <p className="text-sm text-white-50 opacity-90">${userPosition ? (Number(userPosition.collateralValue) / 1e16).toFixed(2) : '0.00'}</p>
                     </div>
-                    <Wallet className="stat-icon" />
+                    <Wallet className="w-8 h-8 text-blue-600" />
                   </div>
                 </div>
 
@@ -431,9 +418,9 @@ function App() {
                     <div className="stat-info">
                       <p className="stat-label">Identity Status</p>
                       <StatusBadge isVerified={isVerified} />
-                      {didInfo && <p className="stat-subtitle">Score: {didInfo.creditScore?.toString()}</p>}
+                      {didInfo && <p className="text-sm text-white-50 opacity-90">Score : {didInfo.creditScore?.toString()}</p>}
                     </div>
-                    <Shield className="stat-icon" />
+                    <Shield className="w-8 h-8 text-green-600" />
                   </div>
                 </div>
 
@@ -441,107 +428,104 @@ function App() {
                   <div className="stat-content">
                     <div className="stat-info">
                       <p className="stat-label">Borrowed Amount</p>
-                      <p className="stat-value">{borrowedAmount} ETH</p>
-                      <p className="stat-subtitle">${userPosition ? (Number(userPosition.borrowedValue) / 1e8).toFixed(2) : '0.00'}</p>
+                      <p className="text-2xl font-bold text-white-900">{borrowedAmount} ETH</p>
+                      <p className="text-sm text-white-50 opacity-90">${userPosition ? (Number(userPosition.borrowedValue) / 1e16).toFixed(4) : '0.00'}</p>
                     </div>
-                    <TrendingUp className="stat-icon" />
+                    <TrendingUp className="w-8 h-8 text-purple-600" />
                   </div>
                 </div>
 
-                <div className="stat-card ratio-card">
+               <div className="stat-card ratio-card">
                   <div className="stat-content">
                     <div className="stat-info">
                       <p className="stat-label">Health Factor</p>
-                      <p className="stat-value">{(collateralRatio / 100).toFixed(1)}%</p>
+                      <p className="text-2xl font-bold text-white-900">{(collateralRatio / 100).toFixed(1)}%</p>
                       <RiskIndicator ratio={collateralRatio} />
                     </div>
-                    <BarChart3 className="stat-icon" />
+                    <BarChart3 className="w-8 h-8 text-orange-600" />
                   </div>
                 </div>
-              </section>
+              </div>
 
-              {/* Enhanced Chainlink Price Feeds Section */}
-              <section className="section-card">
+              {/* Price Feeds */}
+              <div className="section-card">
                 <div className="section-header">
-                  <h2 className="section-title">
-                    <DollarSign className="section-icon" /> 
-                    Chainlink Price Feeds with Health Monitoring
-                    <Sparkles className="ml-2 w-5 h-5 text-yellow-400" />
-                  </h2>
-                  <div className="header-actions">
+                  <div className="section-title">
+                    <DollarSign className="section-icon" />
+                    <h2 className="text-xl font-bold text-white-800">Chainlink Price Feeds</h2>
+                    <Sparkles className="w-5 h-5 text-yellow-400" />
+                  </div>
+                 <div className="header-actions flex justify-between items-center w-full">
                     {upkeepInfo?.needed && (
-                      <div className="upkeep-indicator">
-                        <Timer className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs text-blue-400">Upkeep Needed</span>
+                      <div className="flex items-center gap-1 text-blue-400 text-xs px-2 py-1 rounded-full">
+                        <Timer className="w-4 h-4" />
+                        <span>Upkeep Needed</span>
+                        <button
+                          onClick={refreshPrices}
+                          disabled={loading}
+                          className="p-1 rounded-full transition-colors disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
                       </div>
                     )}
-                    <button 
-                      onClick={refreshPrices} 
-                      className="btn-refresh"
-                      disabled={loading}
-                    >
-                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
+
+                    {!upkeepInfo?.needed && (
+                      <button
+                        onClick={refreshPrices}
+                        disabled={loading}
+                        className="p-2 rounded-full transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                      </button>
+                    )}
                   </div>
-                </div>
-                
+                  </div>
                 <div className={`prices-grid ${isMobile ? 'mobile' : ''}`}>
-                  <PriceCard 
-                    symbol="USDC/USD" 
-                    price={prices.usdc} 
-                    change="+0.01%" 
-                    icon="$" 
+                  <PriceCard
+                    symbol="USDC/USD"
+                    price={prices.usdc}
+                    change="+0.01%"
+                    icon="$"
                     gradient="usdc-gradient"
                     subtitle="Stablecoin Reference"
                     healthStatus={priceDataHealth.USDC}
                   />
-                  <PriceCard 
-                    symbol="ETH/USD" 
-                    price={prices.eth} 
-                    change="+2.45%" 
-                    icon="Ξ" 
+                  <PriceCard
+                    symbol="ETH/USD"
+                    price={prices.eth}
+                    change="+2.45%"
+                    icon="Ξ"
                     gradient="eth-gradient"
                     subtitle="Primary Collateral"
                     healthStatus={priceDataHealth.ETH}
                   />
-                  <PriceCard 
-                    symbol="BTC/USD" 
-                    price={prices.btc} 
-                    change="+1.23%" 
-                    icon="₿" 
+                  <PriceCard
+                    symbol="BTC/USD"
+                    price={prices.btc}
+                    change="+1.23%"
+                    icon="₿"
                     gradient="btc-gradient"
                     subtitle="Market Reference"
                     healthStatus={priceDataHealth.BTC}
                   />
                 </div>
-                
                 <div className="price-feed-info">
-                  {priceUpdateTime && (
-                    <div className="price-update-info">
-                      <Clock className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm text-gray-400">
-                        Last updated: {priceUpdateTime.toLocaleTimeString()}
-                      </span>
-                    </div>
-                  )}
-                  
-                  {/* Price Feed Health Summary */}
-                  <div className="health-summary">
-                    <Database className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-400">
-                      Feeds: {Object.values(priceDataHealth).filter(f => f?.isHealthy).length}/3 healthy
-                    </span>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    {priceUpdateTime && `Last updated: ${priceUpdateTime.toLocaleTimeString()}`}
                   </div>
                 </div>
-              </section>
+              </div>
 
-              {/* Enhanced Identity Verification */}
-              <section className="section-card">
-                <h2 className="section-title">
-                  <Lock className="section-icon" /> 
-                  Enhanced DID Verification with Market Stability Checks
-                </h2>
-                
+              {/* Identity Verification */}
+              <div className="section-card">
+                <div className="section-title">
+                  <div className="flex items-center gap-2">
+                    <Lock className="section-icon" />
+                    <h2 className="text-xl font-bold text-white-900">DID Verification</h2>
+                  </div>
+                </div>
                 <div className="verification-form">
                   <div className="input-group">
                     <label className="input-label">Decentralized Identifier (DID)</label>
@@ -552,56 +536,47 @@ function App() {
                       onChange={(e) => setDidInput(e.target.value)}
                       className="form-input"
                     />
-                    <div className="input-hint">
-                      Valid test DIDs: user123, user456, user789, demo_user, test_verified
-                      <br />
-                      <span className="text-yellow-400">
-                        Note: Verification includes USDC price stability check ($0.99+ required)
-                      </span>
-                    </div>
+                    <p className="input-hint">Valid test DIDs: user123, user456, user789, demo_user, test_verified<br /><span className="text-yellow-500">Note: Requires USDC price ≥ $0.99</span></p>
                   </div>
-                  
                   <button
                     onClick={verifyDID}
                     disabled={loading || !didInput}
                     className="btn btn-primary btn-verify"
                   >
-                    <Send className="btn-icon" />
-                    <span>{loading ? 'Verifying Identity...' : 'Verify DID'}</span>
+                    <Send className="w-4 h-4" />
+                    {loading ? 'Verifying Identity...' : 'Verify DID'}
                   </button>
-                  
                   <div className="status-display">
-                    <span className="status-label">Current Status:</span>
+                    <span className="status-label">Status:</span>
                     <StatusBadge isVerified={isVerified} />
                   </div>
-
                   {/* Enhanced DID Info Display */}
                   {didInfo && (
                     <div className="did-info-card">
-                      <h4 className="did-info-title">Enhanced Identity Profile</h4>
+                      <h4 className="did-info-title text-lg font-bold">Identity Profile</h4>
                       <div className="did-info-grid">
                         <div className="did-info-item">
-                          <span className="did-label">DID:</span>
+                          <span className="did-label">DID : </span>
                           <span className="did-value">{didInfo.did}</span>
                         </div>
                         <div className="did-info-item">
-                          <span className="did-label">Credit Score:</span>
+                          <span className="did-label">Credit Score : </span>
                           <span className="did-value">{didInfo.creditScore?.toString()}</span>
                         </div>
                         <div className="did-info-item">
-                          <span className="did-label">Reputation Points:</span>
+                          <span className="did-label">Reputation Points : </span>
                           <span className="did-value">{didInfo.reputationPoints?.toString()}</span>
                         </div>
                         <div className="did-info-item">
-                          <span className="did-label">Total Borrowed:</span>
+                          <span className="did-label">Total Borrowed : </span>
                           <span className="did-value">{ethers.formatEther(didInfo.totalBorrowed || 0)} ETH</span>
                         </div>
                         <div className="did-info-item">
-                          <span className="did-label">Total Repaid:</span>
+                          <span className="did-label">Total Repaid : </span>
                           <span className="did-value">{ethers.formatEther(didInfo.totalRepaid || 0)} ETH</span>
                         </div>
                         <div className="did-info-item">
-                          <span className="did-label">Account Status:</span>
+                          <span className="did-label">Account Status : </span>
                           <span className={`did-value ${didInfo.isActive ? 'text-green-400' : 'text-red-400'}`}>
                             {didInfo.isActive ? 'Active' : 'Inactive'}
                           </span>
@@ -609,11 +584,11 @@ function App() {
                       </div>
                     </div>
                   )}
+              
                 </div>
-              </section>
+              </div>
 
-              {/* Enhanced Multi-Asset Support Section */}
-              <section className="section-card">
+               <section className="section-card">
                 <h2 className="section-title">
                   <Layers className="section-icon" /> 
                   Multi-Asset Support & Dynamic Rates
@@ -676,7 +651,7 @@ function App() {
                       <div className="lending-stat">
                         <span className="stat-label">USD Value</span>
                         <span className="stat-value">
-                          ${userPosition ? (Number(userPosition.collateralValue) / 1e8).toFixed(2) : '0.00'}
+                          ${userPosition ? (Number(userPosition.collateralValue) / 1e16).toFixed(2) : '0.00'}
                         </span>
                       </div>
                       <div className="lending-stat">
@@ -762,7 +737,6 @@ function App() {
                     </button>
                   </div>
                 </div>
-
                 {/* Advanced Risk Management Panel */}
                 {isVerified && userPosition && (
                   <div className="risk-panel">
@@ -1197,42 +1171,34 @@ function App() {
               </section>
             )}
 
-              {/* Message Display */}
               {message && (
-                <div className={`message ${
+                <div className={`fixed bottom-10 right-4 p-4 rounded-xl shadow-lg border ${
                   message.includes('✅') || message.includes('✨') || message.includes('🎉') 
-                    ? 'success' 
+                    ? 'bg-green-100 border-green-200 text-green-800' 
                     : message.includes('⚠️') || message.includes('📈') || message.includes('📊')
-                    ? 'warning'
-                    : 'error'
-                }`}>
-                  <p className="message-text">{message}</p>
-                  <button 
-                    onClick={() => setMessage('')}
-                    className="message-close"
-                  >
-                    ×
-                  </button>
+                    ? 'bg-yellow-100 border-yellow-200 text-yellow-800'
+                    : 'bg-red-100 border-red-200 text-red-800'
+                } animate-fade-in`}>
+                  <p className="text-sm font-medium">{message}</p>
+                  <button onClick={() => setMessage('')} className="ml-2 text-gray-500 hover:text-gray-700">&times;</button>
                 </div>
               )}
             </div>
           ) : (
-            <div className="network-warning">
-              <div className="warning-content">
-                <Globe className="warning-icon-large" />
-                <h2 className="warning-title">Wrong Network</h2>
-                <p className="warning-text">Please switch to Sepolia testnet to continue</p>
-                <button 
-                  onClick={() => switchChain({ chainId: sepolia.id })}
-                  className="btn btn-primary mt-4"
-                >
-                  Switch to Sepolia
-                </button>
-              </div>
+            <div className="bg-white/80 backdrop-blur-sm rounded-xl p-6 border border-gray-200 shadow-md text-center">
+              <Globe className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Wrong Network</h2>
+              <p className="text-gray-600 mb-4">Please switch to Sepolia testnet to continue</p>
+              <button
+                onClick={() => switchChain({ chainId: sepolia.id })}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              >
+                Switch to Sepolia
+              </button>
             </div>
           )
         ) : (
-          <div className="connect-wallet">
+         <div className="connect-wallet">
             <div className="connect-content">
               <div className="connect-icon">
                 <Wallet className="w-16 h-16" />
