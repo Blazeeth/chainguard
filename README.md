@@ -4,22 +4,6 @@
 
 > **The future of decentralized lending powered by Chainlink's oracle network. Secure, transparent, and fully automated DeFi solutions with decentralized identity verification.**
 
-## 📖 Table of Contents
-
-- [Overview](#overview)
-- [Chainlink Integration](#chainlink-integration)
-- [Live Demo](#live-demo)
-- [Features](#features)
-- [Technology Stack](#technology-stack)
-- [Smart Contract Architecture](#smart-contract-architecture)
-- [Frontend Architecture](#frontend-architecture)
-- [Installation & Setup](#installation--setup)
-- [Usage Guide](#usage-guide)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Team](#team)
-- [License](#license)
-
 ## 🌟 Overview
 
 ChainGuard DeFi is a revolutionary decentralized lending platform that combines **Chainlink Price Feeds**, **Chainlink Automation**, and **Decentralized Identity (DID) verification** to create a secure, transparent, and fully automated lending experience.
