@@ -60,7 +60,7 @@ Our project **makes state changes on the blockchain** using multiple Chainlink s
 
 ## 🚀 Live Demo
 
-🌐 **Live Application**: https://chainguardfi.xyz
+🌐 **Live Application**: https://chainguard.banuja.com
 
 ### Demo Credentials
 - **Test DIDs**: `user123`, `demo_user`, `test_verified`
@@ -376,7 +376,7 @@ npx hardhat verify --network sepolia CONTRACT_ADDRESS
   
 **Contact**: 
 - GitHub: [@Blazeeth](https://github.com/blazeeth)
-- Email: banujalakmuthu@gmail.com
+- Email: contact@banuja.com
 - Twitter: [@banujalakmuthu](https://x.com/banujalakmuthu)
 
 ## 📄 License
@@ -396,7 +396,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Important Links
 
-- **Live Demo**: [ChainGuard DeFi](https://chainguardfi.xyz)
+- **Live Demo**: [ChainGuard DeFi](https://chainguard.banuja.com)
 - **Smart Contract**: [Sepolia Etherscan](https://sepolia.etherscan.io/address/0x957c8f2527f9f7a8ad53ae7d76dcd435108b27d3)
 - **Source Code**: [GitHub Repository](https://github.com/Blazeeth/chainguard)
 - **Chainlink Docs**: [Official Documentation](https://docs.chain.link/)
