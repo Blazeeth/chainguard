@@ -31,7 +31,7 @@ Watch our comprehensive demo to see ChainGuard DeFi in action:
 
 [![ChainGuard DeFi Demo](https://img.youtube.com/vi/7hlb0T8YVCw/0.jpg)](https://www.youtube.com/watch?v=7hlb0T8YVCw)
 
-**YouTube Link**: [Watch Full Demo](https://www.youtube.com/watch?v=7hlb0T8YVCw)
+**YouTube Link**: [Watch Youtube Video](https://www.youtube.com/watch?v=7hlb0T8YVCw)
 
 
 ## 🔗 Chainlink Integration
