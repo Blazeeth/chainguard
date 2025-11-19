@@ -29,8 +29,9 @@ ChainGuard DeFi leverages Chainlink's robust infrastructure to solve these probl
 
 Watch our comprehensive demo to see ChainGuard DeFi in action:
 
-[![ChainGuard DeFi Demo](https://img.youtube.com/vi/7hlb0T8YVCw&t=32s/maxresdefault.jpg)](https://www.youtube.com/watch?v=7hlb0T8YVCw&t=32s)
+[![ChainGuard DeFi Demo](https://img.youtube.com/vi/7hlb0T8YVCw/0.jpg)](https://www.youtube.com/watch?v=7hlb0T8YVCw)
 
+**YouTube Link**: [Watch Full Demo](https://www.youtube.com/watch?v=7hlb0T8YVCw)
 
 
 ## 🔗 Chainlink Integration
@@ -405,7 +406,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🔗 Important Links
 
 - **Live Demo**: [ChainGuard DeFi](https://chainguard.banuja.com)
-- **Demo Video**: [Watch on YouTube](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+- **Demo Video**: [Watch on YouTube](https://www.youtube.com/watch?v=7hlb0T8YVCw)
 - **Smart Contract**: [Sepolia Etherscan](https://sepolia.etherscan.io/address/0x957c8f2527f9f7a8ad53ae7d76dcd435108b27d3)
 - **Source Code**: [GitHub Repository](https://github.com/Blazeeth/chainguard)
 - **Chainlink Docs**: [Official Documentation](https://docs.chain.link/)
